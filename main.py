@@ -1,80 +1,104 @@
-import struct
-import socket
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.uic import loadUi
 
-UDP_IP = "0.0.0.0"
-UDP_PORT = 5000    # Replace with the actual port used by CanEthernet
+from CanEther.drive_data import DriveDataPacket
+from CanEther.network import monitor
 
-SENDER_IP = "192.168.2.28"
+import threading
+from datetime import datetime
 
-# Define the CanEthernetPacketXL header structure
-HEADER_FORMAT = '<HHBH'  # Adjust according to the actual structure
-HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from matplotlib import pyplot as plt
+from matplotlib.ticker import MaxNLocator
+
+MAX_ITERATIONS = 100
+
+class MainWindow(QMainWindow):
+    update_plot_signal = pyqtSignal(DriveDataPacket)
+
+    def __init__(self):
+        super(MainWindow, self).__init__()
+        self.setWindowTitle("CanEtherMonitor")
+        self.setGeometry(100, 100, 800, 600)
+        loadUi("gui/CanEther.ui", self)
+        
+        # Make 2d plot with time on X axis and RPM on Y axis
+        self.fig, self.ax1 = plt.subplots()
+        self.canvas = FigureCanvas(self.fig)
+        
+        self.ax1.set_xlabel("Time (s)")
+        self.ax1.set_ylabel("RPM", color='b')
+        self.ax1.tick_params(axis='y', labelcolor='b')
+
+        self.ax2 = self.ax1.twinx()
+        self.ax2.set_ylabel("Amps", color='r')
+        self.ax2.tick_params(axis='y', labelcolor='r')
+
+        self.ax3 = self.ax1.twinx()
+        self.ax3.spines['right'].set_position(('outward', 60))
+        self.ax3.set_ylabel("FET Temp", color='g')
+        self.ax3.tick_params(axis='y', labelcolor='g')
+
+        self.matlabView.addWidget(self.canvas)
+
+        self.update_plot_signal.connect(self.update_plot)
+
+        #Data lists
+        self.time_series = []
+        self.rpm = []
+        self.amps = []
+        self.fettemp = []
+
+        # Plot lines
+        self.rpm_line, = self.ax1.plot([], [], label="RPM")
+        self.amps_line, = self.ax2.plot([], [], label="Amps", color='r')
+        self.fettemp_line, = self.ax3.plot([], [], label="FET Temp", color='g')
+
+        self.fig.legend(loc='upper left')
+        self.ax1.xaxis.set_major_locator(MaxNLocator(nbins=10))
 
 
+        # Start the monitor thread multithreaded
+        self.monitor_thread = threading.Thread(target=monitor, args=(self,))
+        self.monitor_thread.start()
+
+        self.start_time = datetime.now()
 
 
-class DriveDataPacket:
-    def __init__(self, node_id, amps, rpm, fettemp):
-        self.node_id = node_id
-        self.amps = amps
-        self.rpm = rpm
-        self.fettemp = fettemp
+    def update_plot(self, packet):
+        current_time = (datetime.now() - self.start_time).total_seconds()
+        self.time_series.append(current_time)
+        self.rpm.append(packet.rpm[0])
+        self.amps.append(packet.amps[0])
+        self.fettemp.append(packet.fettemp[0])
 
-    def __str__(self):
-        return f"Node ID: {self.node_id}, Amps: {self.amps}, RPM: {self.rpm}, FET Temp: {self.fettemp}"
+        # Limit the number of data points to the last 100
+        self.time_series = self.time_series[-MAX_ITERATIONS:]
+        self.rpm = self.rpm[-MAX_ITERATIONS:]
+        self.amps = self.amps[-MAX_ITERATIONS:]
+        self.fettemp = self.fettemp[-MAX_ITERATIONS:]
 
+        # Update plot data
+        self.rpm_line.set_data(self.time_series, self.rpm)
+        self.amps_line.set_data(self.time_series, self.amps)
+        self.fettemp_line.set_data(self.time_series, self.fettemp)
 
-def unpack_drive_data_packet(data):
-    # The format string here corresponds to:
-    # 1 byte for nodeId, 12 floats for amps, rpm, and fettemp (4 for each array).
+        # Adjust the view limits
+        self.ax1.relim()
+        self.ax1.autoscale_view()
+        self.ax2.relim()
+        self.ax2.autoscale_view()
+        self.ax3.relim()
+        self.ax3.autoscale_view()
 
-    payload_format_string = "<B12f"  # B = unsigned char (1 byte), f = float (4 bytes)
-   
-    # Unpack the binary data.
-    floats = struct.unpack(payload_format_string, data)
-    print(f"Received data in hex: {' '.join(f'{byte:02x}' for byte in data)}")
-    
-    # Extract the unpacked values.
-    node_id = floats[0]
-    amps = floats[1:5]  # 4 float values
-    rpm = floats[5:9]   # 4 float values
-    fettemp = floats[9:13]  # 4 float values
-    
-    # Create the DriveDataPacket object.
-    packet = DriveDataPacket(node_id, amps, rpm, fettemp)
-    
-    return packet
-
-
-def parse_packet(data):
-
-    # Unpack the header
-    header = struct.unpack(HEADER_FORMAT, data[:HEADER_SIZE])
-    packet_id, packet_type, node_id, length = header[:4]
-    if packet_type != 2 or packet_id != 12353:
-        return None
-    print(f"Header: {header}")
-    
-    # Extract the payload
-    payload = data[HEADER_SIZE:HEADER_SIZE + length] 
-    packet = unpack_drive_data_packet(payload)
-    return packet
-    
-    
-def main():
-    # Create a UDP socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((UDP_IP, UDP_PORT))
-    
-    print(f"Listening on {UDP_IP}:{UDP_PORT}")
-    
-    while True:
-        data, addr = sock.recvfrom(512)  # Buffer size is 2048 bytes
-        print(f"Received data in hex: {' '.join(f'{byte:02x}' for byte in data)}")
-        if addr[0] != SENDER_IP:
-            continue
-        packet = parse_packet(data)
-        print(packet)
+        self.fig.tight_layout()
+        self.canvas.draw()
+        # print("Plot updated")
 
 if __name__ == "__main__":
-    main()
+    app = QApplication([])
+    window = MainWindow()
+    window.show()
+    app.exec()
