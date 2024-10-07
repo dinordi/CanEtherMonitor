@@ -47,56 +47,20 @@ def unpack_drive_data_packet(data):
 
 
 def parse_packet(data):
-    # print(f"Received data: {data}")
-    
+
     # Unpack the header
     header = struct.unpack(HEADER_FORMAT, data[:HEADER_SIZE])
     packet_id, packet_type, node_id, length = header[:4]
     if packet_type != 2 or packet_id != 12353:
-        # print(f"Skipping packet type {packet_type}")
         return None
     print(f"Header: {header}")
-    # print(f"Expected payload length: {length}")
     
     # Extract the payload
-    payload = data[HEADER_SIZE:HEADER_SIZE + length]
-    #print all the data in hex
-
-    # print(f"Payload: {payload}")
-    # print(f"Payload in hex: {payload.hex()}")
+    payload = data[HEADER_SIZE:HEADER_SIZE + length] 
     packet = unpack_drive_data_packet(payload)
     return packet
-    # print(f"Actual payload length: {len(payload)}")
-    # print(f"Payload: {payload}")
     
-    if packet_type == 2:  # Assuming 2 is the type for DriveDataPacket
-        try:
-            drive_data = struct.unpack(DRIVE_DATA_FORMAT, payload[:DRIVE_DATA_SIZE])
-            # print(f"Drive data: {drive_data}")  
-            payload_parsed = {
-                # 'drive_id': drive_data[0],
-                'amps': drive_data[0:4],
-                'rpm': drive_data[4:8],
-                'fet_temp': drive_data[8:12]
-            }
-            # print(f"Parsed drive data: {payload_parsed}")
-        except struct.error as e:
-            print(f"Error unpacking drive data: {e}")
-            drive_data = payload
-            print(f"Raw payload length: {len(payload)}")
-            payload_parsed = None
-    else:
-        payload_parsed = None
-
-    return {
-        'packet_id': hex(packet_id),
-        'packet_type': packet_type,
-        'node_id': node_id,
-        'length': length,
-        'payload': payload,
-        'parsed_payload': payload_parsed
-    }
-
+    
 def main():
     # Create a UDP socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
