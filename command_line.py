@@ -4,7 +4,7 @@ import socket
 UDP_IP = "0.0.0.0"
 UDP_PORT = 5000    # Replace with the actual port used by CanEthernet
 
-SENDER_IP = "192.168.2.28"
+SENDER_IP = "192.168.144.32"
 
 # Define the CanEthernetPacketXL header structure
 HEADER_FORMAT = '<HHBH'  # Adjust according to the actual structure

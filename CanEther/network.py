@@ -6,7 +6,7 @@ from CanEther.drive_data import DriveDataPacket
 UDP_IP = "0.0.0.0"
 UDP_PORT = 5000    # Replace with the actual port used by CanEthernet
 
-SENDER_IP = "192.168.2.28"
+SENDER_IP = "192.168.144.32"
 
 # Define the CanEthernetPacketXL header structure
 HEADER_FORMAT = '<HHBH'  # Adjust according to the actual structure
@@ -54,13 +54,18 @@ def monitor(main_window):
     sock.bind((UDP_IP, UDP_PORT))
     
     # print(f"Listening on {UDP_IP}:{UDP_PORT}")
-    
+    last_update_delta = 0
     while True:
         data, addr = sock.recvfrom(512)  # Buffer size is 2048 bytes
         # print(f"Received data in hex: {' '.join(f'{byte:02x}' for byte in data)}")
         if addr[0] != SENDER_IP:
             continue
         packet = parse_packet(data)
-        # print(packet)
-        main_window.update_plot_signal.emit(packet)
+        print(packet)
+        if packet is not None:
+            if last_update_delta >= 1:
+                last_update_delta = 0
+                main_window.update_plot_signal.emit(packet)
+            else:
+                last_update_delta += 0.01
         # print("Plot signal emitted")
