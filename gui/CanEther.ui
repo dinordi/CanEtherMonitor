@@ -16,9 +16,22 @@
   <widget class="QWidget" name="centralwidget">
    <layout class="QVBoxLayout" name="verticalLayout">
     <item>
+     <widget class="QLabel" name="label_3">
+      <property name="text">
+       <string>Press F5 for refresh!</string>
+      </property>
+     </widget>
+    </item>
+    <item>
      <layout class="QHBoxLayout" name="headerLayout">
       <item>
        <widget class="QPushButton" name="btn_listener">
+        <property name="toolTip">
+         <string>Start listening for UDP packets</string>
+        </property>
+        <property name="toolTipDuration">
+         <number>2000</number>
+        </property>
         <property name="text">
          <string>Start Listening on IP:</string>
         </property>
@@ -26,37 +39,26 @@
       </item>
       <item>
        <widget class="QPushButton" name="btn_csv">
+        <property name="toolTip">
+         <string>Select CSV for plotting</string>
+        </property>
+        <property name="toolTipDuration">
+         <number>2000</number>
+        </property>
         <property name="text">
          <string>Open CSV</string>
         </property>
        </widget>
       </item>
       <item>
-       <widget class="QComboBox" name="comboTheme"/>
-      </item>
-     </layout>
-    </item>
-    <item>
-     <layout class="QHBoxLayout" name="horizontalLayout">
-      <item>
-       <widget class="QLabel" name="label">
-        <property name="text">
-         <string>Min timestamp</string>
+       <widget class="QComboBox" name="comboTheme">
+        <property name="toolTip">
+         <string>Theme for plotting</string>
+        </property>
+        <property name="toolTipDuration">
+         <number>2000</number>
         </property>
        </widget>
-      </item>
-      <item>
-       <widget class="QLineEdit" name="lineEdit_MinTime"/>
-      </item>
-      <item>
-       <widget class="QLabel" name="label_2">
-        <property name="text">
-         <string>Max timestamp</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QLineEdit" name="lineEdit_MaxTime"/>
       </item>
      </layout>
     </item>
