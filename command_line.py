@@ -1,5 +1,6 @@
 import struct
 import socket
+from datetime import datetime
 
 UDP_IP = "0.0.0.0"
 UDP_PORT = 5000    # Replace with the actual port used by CanEthernet
@@ -36,9 +37,9 @@ def unpack_drive_data_packet(data):
     
     # Extract the unpacked values.
     node_id = floats[0]
-    amps = floats[1:5]  # 4 float values
-    rpm = floats[5:9]   # 4 float values
-    fettemp = floats[9:13]  # 4 float values
+    amps = [round(f, 2) for f in floats[1:5]]  # 4 float values rounded to 2 decimals
+    rpm = [round(f, 2) for f in floats[5:9]]   # 4 float values rounded to 2 decimals
+    fettemp = [round(f, 2) for f in floats[9:13]]  # 4 float values rounded to 2 decimals
     
     # Create the DriveDataPacket object.
     packet = DriveDataPacket(node_id, amps, rpm, fettemp)
@@ -51,7 +52,7 @@ def parse_packet(data):
     # Unpack the header
     header = struct.unpack(HEADER_FORMAT, data[:HEADER_SIZE])
     packet_id, packet_type, node_id, length = header[:4]
-    if packet_type != 2 or packet_id != 12353:
+    if packet_type != 6 or packet_id != 12353:
         return None
     print(f"Header: {header}")
     
@@ -59,7 +60,12 @@ def parse_packet(data):
     payload = data[HEADER_SIZE:HEADER_SIZE + length] 
     packet = unpack_drive_data_packet(payload)
     return packet
-    
+
+def logger(packet, logfile):
+        # Write to a file in csv per value per wheel
+        with open(logfile, 'a') as f:
+            f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')},{packet.rpm[0]},{packet.rpm[1]},{packet.rpm[2]},{packet.rpm[3]},{packet.amps[0]},{packet.amps[1]},{packet.amps[2]},{packet.amps[3]},{packet.fettemp[0]},{packet.fettemp[1]},{packet.fettemp[2]},{packet.fettemp[3]}\n")
+
     
 def main():
     # Create a UDP socket
@@ -67,14 +73,16 @@ def main():
     sock.bind((UDP_IP, UDP_PORT))
     
     print(f"Listening on {UDP_IP}:{UDP_PORT}")
-    
+    logfilename = f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
     while True:
         data, addr = sock.recvfrom(512)  # Buffer size is 2048 bytes
-        print(f"Received data in hex: {' '.join(f'{byte:02x}' for byte in data)}")
+        # print(f"Received data in hex: {' '.join(f'{byte:02x}' for byte in data)}")
         if addr[0] != SENDER_IP:
             continue
         packet = parse_packet(data)
-        print(packet)
+        if packet is not None:
+            print(packet)
+            logger(packet, logfilename)
 
 if __name__ == "__main__":
     main()

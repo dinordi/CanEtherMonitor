@@ -1,9 +1,10 @@
-from PyQt6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QComboBox
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtWidgets import QApplication, QMainWindow, QHBoxLayout, QVBoxLayout, QWidget, QPushButton, QComboBox, QGridLayout, QLabel, QFileDialog
+from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.uic import loadUi
 
 from CanEther.drive_data import DriveDataPacket
-from CanEther.network import parse_packet
+from CanEther.network import Network
+from CanEther.dataTable import DataTable
 
 from datetime import datetime
 from collections import deque
@@ -14,43 +15,102 @@ from matplotlib.figure import Figure
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
+import mplcursors
+
+import pandas as pd
+
+
 MAX_ITERATIONS = 200
 
 class MainWindow(QMainWindow):
-    update_plot_signal = pyqtSignal(object)
+    packet_receved_signal = pyqtSignal(DriveDataPacket)
 
     def __init__(self):
         super(MainWindow, self).__init__()
         self.setWindowTitle("CanEtherMonitor")
         self.setGeometry(100, 100, 800, 600)
         loadUi("gui/CanEther.ui", self)
+
+        self.LISTENING_IP = "192.168.144.32"
+        self.network = Network(self.LISTENING_IP, self.packet_receved_signal)
         
+        self.mtl_layout: QGridLayout = self.matlabView
+        self.live_layout: QGridLayout = self.LiveView
+        self.header_layout: QHBoxLayout = self.headerLayout
+
+        csv_button: QPushButton = self.btn_csv
+        csv_button.clicked.connect(self.plot_csv_select)
+        
+        self.listener_button: QPushButton = self.btn_listener
+        self.listener_button.clicked.connect(self.toggleListener)
+        self.listener_button.setText(f"Start Listening on IP: {self.LISTENING_IP}")
+
         # ComboBox for selecting index
         self.index_selector = QComboBox(self)
         self.index_selector.addItems(['0', '1', '2', '3'])
         self.index_selector.currentIndexChanged.connect(self.change_index)
-        self.matlabView.addWidget(self.index_selector)
 
+        self.mtl_layout.addWidget(self.index_selector)
+
+        self.setupTable()
+        self.setupMPL()
+
+        # Initialize index
+        self.index = 0
+        self.logfile = ""
+        self.csv_file = ""
+
+
+    def toggleListener(self):
+        text = self.listener_button.text()
+        toggle = "Start" in text
+
+        self.network.toggleListener(toggle)
+        if toggle:  #Make new CSV file
+            self.startTime = datetime.now()
+            self.logfile = f"{self.startTime.strftime('%Y_%m_%d_%H_%M_%S')}.csv"
+            with open(self.logfile, 'w') as f:
+                f.write('')
+            self.listener_button.setText(f"Stop Listening on IP: {self.LISTENING_IP}")
+        else:
+            self.listener_button.setText(f"Start Listening on IP: {self.LISTENING_IP}")
+
+        try:
+            self.packet_receved_signal.disconnect()
+        except:
+            pass
+        self.packet_receved_signal.connect(self.handle_packet)
+
+    def handle_packet(self, packet: DriveDataPacket):
+        self.logger(packet)
+        self.tableWidget.update_table(packet)
+
+    def setupTable(self):
+        self.tableWidget = DataTable()
+        self.live_layout.addWidget(self.tableWidget)
+
+    def setupMPL(self):
         # Initialize plot
         self.fig, self.ax1 = plt.subplots()
         self.canvas = FigureCanvas(self.fig)
         
         self.ax1.set_xlabel("Time (s)")
         self.ax1.set_ylabel("RPM", color='b')
+        self.ax1.set_ylim(0.0, 16000.0)
         self.ax1.tick_params(axis='y', labelcolor='b')
 
         self.ax2 = self.ax1.twinx()
         self.ax2.set_ylabel("Amps", color='r')
+        self.ax2.set_ylim(-200.0, 200.0)
         self.ax2.tick_params(axis='y', labelcolor='r')
 
         self.ax3 = self.ax1.twinx()
         self.ax3.spines['right'].set_position(('outward', 60))
         self.ax3.set_ylabel("FET Temp", color='g')
+        self.ax3.set_ylim(0.0, 100.0)
         self.ax3.tick_params(axis='y', labelcolor='g')
 
-        self.matlabView.addWidget(self.canvas)
-
-        self.update_plot_signal.connect(self.update_plot)
+        self.mtl_layout.addWidget(self.canvas)
 
         # Data lists
         self.time_series = deque(maxlen=MAX_ITERATIONS)
@@ -66,53 +126,77 @@ class MainWindow(QMainWindow):
         self.fig.legend(loc='upper left')
         self.ax1.xaxis.set_major_locator(MaxNLocator(nbins=8))
 
-        # Set up UDP socket
-        self.UDP_IP = "0.0.0.0"
-        self.UDP_PORT = 5000
-        self.SENDER_IP = "192.168.144.32"
+        # Enable mplcursors for hovering
+        self.cursor_rpm = mplcursors.cursor(self.rpm_line, hover=True)
+        self.cursor_rpm.connect("add", lambda sel: sel.annotation.set_text(f'Time: {sel.target[0]:.2f}s\nRPM: {sel.target[1]:.2f}'))
 
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind((self.UDP_IP, self.UDP_PORT))
-        self.sock.settimeout(1.0)  # Set a timeout of 1 second
+        self.cursor_amps = mplcursors.cursor(self.amps_line, hover=True)
+        self.cursor_amps.connect("add", lambda sel: sel.annotation.set_text(f'Time: {sel.target[0]:.2f}s\nAmps: {sel.target[1]:.2f}'))
 
-        self.start_time = datetime.now()
+        self.cursor_fettemp = mplcursors.cursor(self.fettemp_line, hover=True)
+        self.cursor_fettemp.connect("add", lambda sel: sel.annotation.set_text(f'Time: {sel.target[0]:.2f}s\nFET Temp: {sel.target[1]:.2f}'))
 
-        # Initialize index
-        self.index = 0
+    def logger(self, packet):
+        # Write to a file in csv per value per wheel
+        with open(self.logfile, 'a') as f:
+            f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')},{packet.rpm[0]},{packet.rpm[1]},{packet.rpm[2]},{packet.rpm[3]},{packet.amps[0]},{packet.amps[1]},{packet.amps[2]},{packet.amps[3]},{packet.fettemp[0]},{packet.fettemp[1]},{packet.fettemp[2]},{packet.fettemp[3]}\n")
 
-        
+    def read_log_csv(self, logfilename):
+        # Read the CSV file into a DataFrame
+        try:
+            df = pd.read_csv(logfilename, parse_dates=[0], header=None)
+        except:
+            print("CSV empty")
+            return None
+        df.columns = ['Timestamp', 'RPM1', 'RPM2', 'RPM3', 'RPM4', 'Amps1', 'Amps2', 'Amps3', 'Amps4', 'FETTemp1', 'FETTemp2', 'FETTemp3', 'FETTemp4']
+        return df
 
-        # Timer to periodically check for new data
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.receive_data)
-        self.timer.start(50)  # Check for new data every 50 ms
+    def plot_csv_data(self, logfilename):
+        df = self.read_log_csv(logfilename)
+        if df is None:
+            return
+
+        #TODO: clean this up
+        time_series = df['Timestamp'].to_list()
+        rpm1 = df['RPM1'].to_list()
+        rpm2 = df['RPM2'].to_list()
+        rpm3 = df['RPM3'].to_list()
+        rpm4 = df['RPM4'].to_list()
+        amps1 = df['Amps1'].to_list()
+        amps2 = df['Amps2'].to_list()
+        amps3 = df['Amps3'].to_list()
+        amps4 = df['Amps4'].to_list()
+        fettemp1 = df['FETTemp1'].to_list()
+        fettemp2 = df['FETTemp2'].to_list()
+        fettemp3 = df['FETTemp3'].to_list()
+        fettemp4 = df['FETTemp4'].to_list()
+
+        data1 = (time_series, rpm1, amps1, fettemp1)
+        data2 = (time_series, rpm2, amps2, fettemp2)
+        data3 = (time_series, rpm3, amps3, fettemp3)
+        data4 = (time_series, rpm4, amps4, fettemp4)
+            
+        main_data = [data1, data2, data3, data4]
+        self.update_plot(main_data[self.index])
+
+    def plot_csv_select(self):
+        # Select the CSV file
+        file_name, _ = QFileDialog.getOpenFileName(self, "Open CSV File", "", "CSV Files (*.csv)")
+        if file_name:
+            self.plot_csv_data(file_name)
+            self.csv_file = file_name
 
     def change_index(self, index):
         self.index = index
-
-    def receive_data(self):
-        try:
-            data, addr = self.sock.recvfrom(512)  # Buffer size is 512 bytes
-            if addr[0] != self.SENDER_IP:
-                return
-            packet = parse_packet(data)
-            if packet is not None:
-                current_time = (datetime.now() - self.start_time).total_seconds()
-                self.update_plot_signal.emit((current_time, packet.rpm[self.index], packet.amps[self.index], packet.fettemp[self.index]))
-        except socket.timeout:
-            pass
-
+        self.plot_csv_data(self.csv_file)
+    
     def update_plot(self, data):
         current_time, rpm, amps, fettemp = data
 
-        self.time_series.append(current_time)
-        self.rpm.append(rpm)
-        self.amps.append(amps)
-        self.fettemp.append(fettemp)
-
-        self.rpm_line.set_data(self.time_series, self.rpm)
-        self.amps_line.set_data(self.time_series, self.amps)
-        self.fettemp_line.set_data(self.time_series, self.fettemp)
+        self.time_series = current_time
+        self.rpm_line.set_data(self.time_series, rpm)
+        self.amps_line.set_data(self.time_series, amps)
+        self.fettemp_line.set_data(self.time_series, fettemp)
 
         self.ax1.relim()
         self.ax1.autoscale_view()

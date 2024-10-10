@@ -2,6 +2,7 @@ import struct
 import socket
 from CanEther.drive_data import DriveDataPacket
 
+from PyQt6.QtCore import QThread, QObject, pyqtSignal
 
 UDP_IP = "0.0.0.0"
 UDP_PORT = 5000    # Replace with the actual port used by CanEthernet
@@ -24,14 +25,15 @@ def unpack_drive_data_packet(data):
     
     # Extract the unpacked values.
     node_id = floats[0]
-    amps = floats[1:5]  # 4 float values
-    rpm = floats[5:9]   # 4 float values
-    fettemp = floats[9:13]  # 4 float values
-    
+    amps = [round(f, 2) for f in floats[1:5]]  # 4 float values rounded to 2 decimals
+    rpm = [round(f, 2) for f in floats[5:9]]   # 4 float values rounded to 2 decimals
+    fettemp = [round(f, 2) for f in floats[9:13]]  # 4 float values rounded to 2 decimals
+
     # Create the DriveDataPacket object.
     packet = DriveDataPacket(node_id, amps, rpm, fettemp)
     
     return packet
+
 
 
 def parse_packet(data):
@@ -39,7 +41,7 @@ def parse_packet(data):
     # Unpack the header
     header = struct.unpack(HEADER_FORMAT, data[:HEADER_SIZE])
     packet_id, packet_type, node_id, length = header[:4]
-    if packet_type != 2 or packet_id != 12353:
+    if packet_type != 6 or packet_id != 12353:
         return None
     
     # Extract the payload
@@ -69,3 +71,64 @@ def monitor(main_window):
             else:
                 last_update_delta += 0.01
         # print("Plot signal emitted")
+
+class NetworkWorker(QObject):
+    packet_received = pyqtSignal(object)
+
+    def __init__(self, sock, sender_ip, debug=False):
+        super().__init__()
+        self.sock = sock
+        self.SENDER_IP = sender_ip
+        self.debug = debug
+        self.listening = False
+
+    def start_listening(self):
+        self.listening = True
+        self.monitor()
+
+    def stop_listening(self):
+        self.listening = False
+
+    def monitor(self):
+        print(f"Listening on {self.sock.getsockname()[0]}:{self.sock.getsockname()[1]}")
+        while self.listening:
+            try:
+                data, addr = self.sock.recvfrom(512)  # Buffer size is 512 bytes
+                if addr[0] != self.SENDER_IP:
+                    continue
+                if self.debug:
+                    print(f"Received data in hex: {' '.join(f'{byte:02x}' for byte in data)}")
+                packet = parse_packet(data)
+                if packet is not None:
+                    self.packet_received.emit(packet)  # Send packet to GUI
+            except socket.timeout:
+                pass
+
+class Network:
+    def __init__(self, sender_ip, pyqt_signal, UDP_PORT=5000, debug=False):
+        self.SENDER_IP = sender_ip
+        self.UDP_PORT = UDP_PORT
+        self.UDP_IP = "0.0.0.0"
+        self.debug = debug
+        self.emit_signal = pyqt_signal
+
+        # Socket
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind((self.UDP_IP, self.UDP_PORT))
+        self.sock.settimeout(1.0)  # Set a timeout of 1 second
+
+        # Worker and thread
+        self.worker = NetworkWorker(self.sock, self.SENDER_IP, self.debug)
+        self.worker.packet_received.connect(self.emit_signal)
+        self.thread = QThread()
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.start_listening)
+
+    def toggleListener(self, toggle: bool):
+        if toggle:
+            if not self.thread.isRunning():
+                self.thread.start()
+        else:
+            self.worker.stop_listening()
+            self.thread.quit()
+            self.thread.wait()
