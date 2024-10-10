@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import QApplication, QMainWindow, QHBoxLayout, QVBoxLayout, QWidget, QPushButton, QComboBox, QGridLayout, QLabel, QFileDialog
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
+from PyQt6.QtGui import QShortcut, QKeySequence
 from PyQt6.uic import loadUi
 
 from CanEther.drive_data import DriveDataPacket
@@ -14,13 +15,15 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib import pyplot as plt
 from matplotlib.ticker import MaxNLocator
+import matplotlib.dates as mdates
 
 import mplcursors
 
 import pandas as pd
+import numpy as np
 
 
-MAX_ITERATIONS = 200
+MAX_ITERATIONS = 50
 
 class MainWindow(QMainWindow):
     packet_receved_signal = pyqtSignal(DriveDataPacket)
@@ -59,6 +62,9 @@ class MainWindow(QMainWindow):
         self.index = 0
         self.logfile = ""
         self.csv_file = ""
+
+        shortcut = QShortcut(QKeySequence("F5"), self)
+        shortcut.activated.connect(self.refresh_plot)
 
 
     def toggleListener(self):
@@ -112,29 +118,33 @@ class MainWindow(QMainWindow):
 
         self.mtl_layout.addWidget(self.canvas)
 
-        # Data lists
-        self.time_series = deque(maxlen=MAX_ITERATIONS)
-        self.rpm = deque(maxlen=MAX_ITERATIONS)
-        self.amps = deque(maxlen=MAX_ITERATIONS)
-        self.fettemp = deque(maxlen=MAX_ITERATIONS)
-
         # Plot lines
         self.rpm_line, = self.ax1.plot([], [], label="RPM", color='b')
         self.amps_line, = self.ax2.plot([], [], label="Amps", color='r')
         self.fettemp_line, = self.ax3.plot([], [], label="FET Temp", color='g')
 
+        self.rpm_dots = self.ax1.scatter([], [], color='b')
+        self.amps_dots = self.ax2.scatter([], [], color='r')
+        self.fettemp_dots = self.ax3.scatter([], [], color='g')
+
         self.fig.legend(loc='upper left')
         self.ax1.xaxis.set_major_locator(MaxNLocator(nbins=8))
 
+        self.ax1.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+        self.ax1.xaxis.set_minor_locator(mdates.SecondLocator(interval=10))
+
         # Enable mplcursors for hovering
-        self.cursor_rpm = mplcursors.cursor(self.rpm_line, hover=True)
-        self.cursor_rpm.connect("add", lambda sel: sel.annotation.set_text(f'Time: {sel.target[0]:.2f}s\nRPM: {sel.target[1]:.2f}'))
+        self.cursor_rpm = mplcursors.cursor(self.rpm_dots, hover=True)
+        self.cursor_rpm.connect("add", lambda sel: sel.annotation.set_text(
+            f'Time: {mdates.num2date(sel.target[0]).strftime("%H:%M:%S")}\nRPM: {sel.target[1]:.2f}'))
 
-        self.cursor_amps = mplcursors.cursor(self.amps_line, hover=True)
-        self.cursor_amps.connect("add", lambda sel: sel.annotation.set_text(f'Time: {sel.target[0]:.2f}s\nAmps: {sel.target[1]:.2f}'))
+        self.cursor_amps = mplcursors.cursor(self.amps_dots, hover=True)
+        self.cursor_amps.connect("add", lambda sel: sel.annotation.set_text(
+            f'Time: {mdates.num2date(sel.target[0]).strftime("%H:%M:%S")}\nAmps: {sel.target[1]:.2f}'))
 
-        self.cursor_fettemp = mplcursors.cursor(self.fettemp_line, hover=True)
-        self.cursor_fettemp.connect("add", lambda sel: sel.annotation.set_text(f'Time: {sel.target[0]:.2f}s\nFET Temp: {sel.target[1]:.2f}'))
+        self.cursor_fettemp = mplcursors.cursor(self.fettemp_dots, hover=True)
+        self.cursor_fettemp.connect("add", lambda sel: sel.annotation.set_text(
+            f'Time: {mdates.num2date(sel.target[0]).strftime("%H:%M:%S")}\nFET Temp: {sel.target[1]:.2f}'))
 
     def logger(self, packet):
         # Write to a file in csv per value per wheel
@@ -190,13 +200,21 @@ class MainWindow(QMainWindow):
         self.index = index
         self.plot_csv_data(self.csv_file)
     
+    def refresh_plot(self):
+        self.plot_csv_data(self.csv_file)
+
     def update_plot(self, data):
         current_time, rpm, amps, fettemp = data
-
+        
         self.time_series = current_time
         self.rpm_line.set_data(self.time_series, rpm)
         self.amps_line.set_data(self.time_series, amps)
         self.fettemp_line.set_data(self.time_series, fettemp)
+
+        self.rpm_dots.set_offsets(np.c_[self.time_series, rpm])
+        self.amps_dots.set_offsets(np.c_[self.time_series, amps])
+        self.fettemp_dots.set_offsets(np.c_[self.time_series, fettemp])
+
 
         self.ax1.relim()
         self.ax1.autoscale_view()
