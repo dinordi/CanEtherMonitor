@@ -3,9 +3,10 @@ from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtGui import QShortcut, QKeySequence
 from PyQt6.uic import loadUi
 
-from CanEther.drive_data import DriveDataPacket
+from CanEther.drive_data import DriveDataPacket, read_log_csv, filter_data_by_timestamp
 from CanEther.network import Network
 from CanEther.dataTable import DataTable
+from CanEther.mplGraphs import rpmGraph
 
 from datetime import datetime
 from collections import deque
@@ -55,8 +56,12 @@ class MainWindow(QMainWindow):
 
         self.mtl_layout.addWidget(self.index_selector)
 
+        self.rpmGraph = rpmGraph(self)
+
         self.setupTable()
-        self.setupMPL()
+        self.setupWheelMPL()
+
+        self.setupRPMGraph()
 
         # Initialize index
         self.index = 0
@@ -95,7 +100,7 @@ class MainWindow(QMainWindow):
         self.tableWidget = DataTable()
         self.live_layout.addWidget(self.tableWidget)
 
-    def setupMPL(self):
+    def setupWheelMPL(self):
         # Initialize plot
         self.fig, self.ax1 = plt.subplots()
         self.canvas = FigureCanvas(self.fig)
@@ -145,21 +150,24 @@ class MainWindow(QMainWindow):
         self.cursor_fettemp = mplcursors.cursor(self.fettemp_dots, hover=True)
         self.cursor_fettemp.connect("add", lambda sel: sel.annotation.set_text(
             f'Time: {mdates.num2date(sel.target[0]).strftime("%H:%M:%S.%f")}\nFET Temp: {sel.target[1]:.2f}'))
+    
+    def setupRPMGraph(self):
+        self.rpmView.addWidget(self.rpmGraph.get_frame())
 
     def logger(self, packet):
         # Write to a file in csv per value per wheel
         with open(self.logfile, 'a') as f:
             f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')},{packet.rpm[0]},{packet.rpm[1]},{packet.rpm[2]},{packet.rpm[3]},{packet.amps[0]},{packet.amps[1]},{packet.amps[2]},{packet.amps[3]},{packet.fettemp[0]},{packet.fettemp[1]},{packet.fettemp[2]},{packet.fettemp[3]}\n")
 
-    def read_log_csv(self, logfilename):
-        # Read the CSV file into a DataFrame
-        try:
-            df = pd.read_csv(logfilename, parse_dates=[0], header=None)
-        except:
-            print("CSV empty")
-            return None
-        df.columns = ['Timestamp', 'RPM1', 'RPM2', 'RPM3', 'RPM4', 'Amps1', 'Amps2', 'Amps3', 'Amps4', 'FETTemp1', 'FETTemp2', 'FETTemp3', 'FETTemp4']
-        return df
+    # def read_log_csv(self, logfilename):
+    #     # Read the CSV file into a DataFrame
+    #     try:
+    #         df = pd.read_csv(logfilename, parse_dates=[0], header=None)
+    #     except:
+    #         print("CSV empty")
+    #         return None
+    #     df.columns = ['Timestamp', 'RPM1', 'RPM2', 'RPM3', 'RPM4', 'Amps1', 'Amps2', 'Amps3', 'Amps4', 'FETTemp1', 'FETTemp2', 'FETTemp3', 'FETTemp4']
+    #     return df
 
     def get_timestamps(self, df) -> tuple:
         min_timestamp = df['Timestamp'].iloc[0]
@@ -169,18 +177,15 @@ class MainWindow(QMainWindow):
         print(min_timestamp, max_timestamp)
         return min_timestamp, max_timestamp
 
-    def filter_data_by_timestamp(self, df, min_timestamp, max_timestamp):
-        df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-        mask = (df['Timestamp'] >= min_timestamp) & (df['Timestamp'] <= max_timestamp)
-        return df.loc[mask]
+    
 
     def plot_csv_data(self, logfilename):
-        df = self.read_log_csv(logfilename)
+        df = read_log_csv(logfilename)
         if df is None:
             return
         min_timestamp = self.lineEdit_MinTime.text()
         max_timestamp = self.lineEdit_MaxTime.text()
-        df = self.filter_data_by_timestamp(df, min_timestamp, max_timestamp)
+        df = filter_data_by_timestamp(df, min_timestamp, max_timestamp)
 
         #TODO: clean this up
         time_series = df['Timestamp'].to_list()
@@ -210,11 +215,12 @@ class MainWindow(QMainWindow):
         file_name, _ = QFileDialog.getOpenFileName(self, "Open CSV File", "", "CSV Files (*.csv)")
         if file_name:
             self.csv_file = file_name
-            df = self.read_log_csv(file_name)
+            df = read_log_csv(file_name)
             min_timestamp, max_timestamp = self.get_timestamps(df)
             self.lineEdit_MinTime.setText(min_timestamp.strftime('%Y-%m-%d %H:%M:%S.%f'))
             self.lineEdit_MaxTime.setText(max_timestamp.strftime('%Y-%m-%d %H:%M:%S.%f'))
             self.plot_csv_data(file_name)
+            self.rpmGraph.update_graph(self.csv_file)
 
     def change_index(self, index):
         self.index = index
@@ -222,6 +228,7 @@ class MainWindow(QMainWindow):
     
     def refresh_plot(self):
         self.plot_csv_data(self.csv_file)
+        self.rpmGraph.update_graph(self.csv_file)
 
     def update_plot(self, data):
         current_time, rpm, amps, fettemp = data
