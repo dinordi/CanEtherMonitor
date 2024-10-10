@@ -6,7 +6,7 @@ from PyQt6.uic import loadUi
 from CanEther.drive_data import DriveDataPacket, read_log_csv, filter_data_by_timestamp
 from CanEther.network import Network
 from CanEther.dataTable import DataTable
-from CanEther.mplGraphs import rpmGraph
+from CanEther.mplGraphs import rpmGraph, ampsGraph
 
 from datetime import datetime
 from collections import deque
@@ -57,11 +57,12 @@ class MainWindow(QMainWindow):
         self.mtl_layout.addWidget(self.index_selector)
 
         self.rpmGraph = rpmGraph(self)
+        self.ampsGraph = ampsGraph(self)
 
         self.setupTable()
         self.setupWheelMPL()
 
-        self.setupRPMGraph()
+        self.setupMPLGraphs()
 
         # Initialize index
         self.index = 0
@@ -151,8 +152,9 @@ class MainWindow(QMainWindow):
         self.cursor_fettemp.connect("add", lambda sel: sel.annotation.set_text(
             f'Time: {mdates.num2date(sel.target[0]).strftime("%H:%M:%S.%f")}\nFET Temp: {sel.target[1]:.2f}'))
     
-    def setupRPMGraph(self):
+    def setupMPLGraphs(self):
         self.rpmView.addWidget(self.rpmGraph.get_frame())
+        self.ampsView.addWidget(self.ampsGraph.get_frame())
 
     def logger(self, packet):
         # Write to a file in csv per value per wheel
@@ -221,6 +223,7 @@ class MainWindow(QMainWindow):
             self.lineEdit_MaxTime.setText(max_timestamp.strftime('%Y-%m-%d %H:%M:%S.%f'))
             self.plot_csv_data(file_name)
             self.rpmGraph.update_graph(self.csv_file)
+            self.ampsGraph.update_graph(self.csv_file)
 
     def change_index(self, index):
         self.index = index
@@ -229,6 +232,7 @@ class MainWindow(QMainWindow):
     def refresh_plot(self):
         self.plot_csv_data(self.csv_file)
         self.rpmGraph.update_graph(self.csv_file)
+        self.ampsGraph.update_graph(self.csv_file)
 
     def update_plot(self, data):
         current_time, rpm, amps, fettemp = data
