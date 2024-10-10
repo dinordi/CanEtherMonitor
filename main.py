@@ -102,12 +102,12 @@ class MainWindow(QMainWindow):
         
         self.ax1.set_xlabel("Time (s)")
         self.ax1.set_ylabel("RPM", color='b')
-        self.ax1.set_ylim(0.0, 16000.0)
+        self.ax1.set_ylim(-6000.0, 6000.0)
         self.ax1.tick_params(axis='y', labelcolor='b')
 
         self.ax2 = self.ax1.twinx()
         self.ax2.set_ylabel("Amps", color='r')
-        self.ax2.set_ylim(-200.0, 200.0)
+        self.ax2.set_ylim(-50.0, 100.0)
         self.ax2.tick_params(axis='y', labelcolor='r')
 
         self.ax3 = self.ax1.twinx()
@@ -130,26 +130,26 @@ class MainWindow(QMainWindow):
         self.fig.legend(loc='upper left')
         self.ax1.xaxis.set_major_locator(MaxNLocator(nbins=8))
 
-        self.ax1.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+        self.ax1.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S.%f'))
         self.ax1.xaxis.set_minor_locator(mdates.SecondLocator(interval=10))
 
         # Enable mplcursors for hovering
         self.cursor_rpm = mplcursors.cursor(self.rpm_dots, hover=True)
         self.cursor_rpm.connect("add", lambda sel: sel.annotation.set_text(
-            f'Time: {mdates.num2date(sel.target[0]).strftime("%H:%M:%S")}\nRPM: {sel.target[1]:.2f}'))
+            f'Time: {mdates.num2date(sel.target[0]).strftime("%H:%M:%S.%f")}\nRPM: {sel.target[1]:.2f}'))
 
         self.cursor_amps = mplcursors.cursor(self.amps_dots, hover=True)
         self.cursor_amps.connect("add", lambda sel: sel.annotation.set_text(
-            f'Time: {mdates.num2date(sel.target[0]).strftime("%H:%M:%S")}\nAmps: {sel.target[1]:.2f}'))
+            f'Time: {mdates.num2date(sel.target[0]).strftime("%H:%M:%S.%f")}\nAmps: {sel.target[1]:.2f}'))
 
         self.cursor_fettemp = mplcursors.cursor(self.fettemp_dots, hover=True)
         self.cursor_fettemp.connect("add", lambda sel: sel.annotation.set_text(
-            f'Time: {mdates.num2date(sel.target[0]).strftime("%H:%M:%S")}\nFET Temp: {sel.target[1]:.2f}'))
+            f'Time: {mdates.num2date(sel.target[0]).strftime("%H:%M:%S.%f")}\nFET Temp: {sel.target[1]:.2f}'))
 
     def logger(self, packet):
         # Write to a file in csv per value per wheel
         with open(self.logfile, 'a') as f:
-            f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')},{packet.rpm[0]},{packet.rpm[1]},{packet.rpm[2]},{packet.rpm[3]},{packet.amps[0]},{packet.amps[1]},{packet.amps[2]},{packet.amps[3]},{packet.fettemp[0]},{packet.fettemp[1]},{packet.fettemp[2]},{packet.fettemp[3]}\n")
+            f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')},{packet.rpm[0]},{packet.rpm[1]},{packet.rpm[2]},{packet.rpm[3]},{packet.amps[0]},{packet.amps[1]},{packet.amps[2]},{packet.amps[3]},{packet.fettemp[0]},{packet.fettemp[1]},{packet.fettemp[2]},{packet.fettemp[3]}\n")
 
     def read_log_csv(self, logfilename):
         # Read the CSV file into a DataFrame
@@ -161,10 +161,26 @@ class MainWindow(QMainWindow):
         df.columns = ['Timestamp', 'RPM1', 'RPM2', 'RPM3', 'RPM4', 'Amps1', 'Amps2', 'Amps3', 'Amps4', 'FETTemp1', 'FETTemp2', 'FETTemp3', 'FETTemp4']
         return df
 
+    def get_timestamps(self, df) -> tuple:
+        min_timestamp = df['Timestamp'].iloc[0]
+        max_timestamp = df['Timestamp'].iloc[-1]
+        
+
+        print(min_timestamp, max_timestamp)
+        return min_timestamp, max_timestamp
+
+    def filter_data_by_timestamp(self, df, min_timestamp, max_timestamp):
+        df['Timestamp'] = pd.to_datetime(df['Timestamp'])
+        mask = (df['Timestamp'] >= min_timestamp) & (df['Timestamp'] <= max_timestamp)
+        return df.loc[mask]
+
     def plot_csv_data(self, logfilename):
         df = self.read_log_csv(logfilename)
         if df is None:
             return
+        min_timestamp = self.lineEdit_MinTime.text()
+        max_timestamp = self.lineEdit_MaxTime.text()
+        df = self.filter_data_by_timestamp(df, min_timestamp, max_timestamp)
 
         #TODO: clean this up
         time_series = df['Timestamp'].to_list()
@@ -193,8 +209,12 @@ class MainWindow(QMainWindow):
         # Select the CSV file
         file_name, _ = QFileDialog.getOpenFileName(self, "Open CSV File", "", "CSV Files (*.csv)")
         if file_name:
-            self.plot_csv_data(file_name)
             self.csv_file = file_name
+            df = self.read_log_csv(file_name)
+            min_timestamp, max_timestamp = self.get_timestamps(df)
+            self.lineEdit_MinTime.setText(min_timestamp.strftime('%Y-%m-%d %H:%M:%S.%f'))
+            self.lineEdit_MaxTime.setText(max_timestamp.strftime('%Y-%m-%d %H:%M:%S.%f'))
+            self.plot_csv_data(file_name)
 
     def change_index(self, index):
         self.index = index

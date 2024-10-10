@@ -63,7 +63,7 @@ def monitor(main_window):
         if addr[0] != SENDER_IP:
             continue
         packet = parse_packet(data)
-        print(packet)
+        # print(packet)
         if packet is not None:
             if last_update_delta >= 1:
                 last_update_delta = 0

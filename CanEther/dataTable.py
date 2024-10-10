@@ -33,8 +33,8 @@ class DataTable(QWidget):
         Update the table with new data from a DriveDataPacket.
         :param packet: A DriveDataPacket instance containing the new data.
         """
-        print(packet)
-        print(type(packet))
+        # print(packet)
+        # print(type(packet))
         data = {
             "RPM": packet.rpm,
             "Amps": packet.amps,
@@ -45,4 +45,4 @@ class DataTable(QWidget):
             if row_name in data:
                 for j, value in enumerate(data[row_name], start=1):
                     self.labels[i][j].setText(str(value))
-                    print(f"Updating {row_name} {j} to {value}")
+                    # print(f"Updating {row_name} {j} to {value}")
